@@ -98,11 +98,33 @@ static void shift_light_mask(void *pixels, int32_t pitch, const void *mask, int3
     unsigned tail = (unsigned)(((uintptr_t)d >> 1) ^ (uint32_t)width) & 1;
     unsigned pairs = ((unsigned)width - tail) >> 1;
     for (int32_t y = 0; y < height; ++y) {
-        unsigned count = 2 * pairs + tail + (((uintptr_t)d & 3) != 0);
-        for (unsigned x = 0; x < count; ++x) {
+        if ((uintptr_t)d & 3) {
             unsigned shift = *s++;
             okgf_store16(
-                d, (uint16_t)((okgf_load16(d) >> shift) &
+                d, (uint16_t)((okgf_load16(d) >> (shift & 31)) &
+                              (is555 ? okgf_shift_mask555(shift) : okgf_shift_mask565(shift))));
+            d += 2;
+        }
+        for (unsigned x = 0; x < pairs; ++x) {
+            /* HD: 0x1005C75D..0x1005C791. Load both mask
+             * bytes and pixels before storing so aliased masks survive. */
+            uint16_t shifts = okgf_load16(s);
+            if (shifts) {
+                unsigned first = shifts & 255, second = shifts >> 8;
+                uint32_t value = okgf_load32(d);
+                uint32_t low = ((value & 65535) >> (first & 31)) &
+                               (is555 ? okgf_shift_mask555(first) : okgf_shift_mask565(first));
+                uint32_t high = ((value >> 16) >> (second & 31)) &
+                                (is555 ? okgf_shift_mask555(second) : okgf_shift_mask565(second));
+                okgf_store32(d, low | (high << 16));
+            }
+            s += 2;
+            d += 4;
+        }
+        if (tail) {
+            unsigned shift = *s++;
+            okgf_store16(
+                d, (uint16_t)((okgf_load16(d) >> (shift & 31)) &
                               (is555 ? okgf_shift_mask555(shift) : okgf_shift_mask565(shift))));
             d += 2;
         }

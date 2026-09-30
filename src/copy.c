@@ -89,6 +89,16 @@ static void copy_rect(OKGF_RECT_ARGS, enum CopyMode mode, uint16_t key) {
                 okgf_store32(d + (ptrdiff_t)2 * x, first);
                 okgf_store32(d + (ptrdiff_t)2 * x + 4, second);
             }
+        } else if (mode == COPY_TRANSPARENT) {
+            /* HD: 0x1005BE49. A DWORD load supplies both conditional WORD
+             * stores, including when the first store overlaps the source. */
+            for (; x <= width - 2; x += 2) {
+                uint32_t pair = okgf_load32(s + (ptrdiff_t)2 * x);
+                if ((uint16_t)pair != key)
+                    okgf_store16(d + (ptrdiff_t)2 * x, (uint16_t)pair);
+                if ((uint16_t)(pair >> 16) != key)
+                    okgf_store16(d + (ptrdiff_t)2 * x + 2, (uint16_t)(pair >> 16));
+            }
         } else if (mode == COPY_HALF || mode == COPY_HALF555) {
             /* Both releases load four source and destination pixels before either
              * DWORD store. A pixel-at-a-time loop changes overlapping copies.
@@ -150,10 +160,11 @@ static void pal_copy(OKGF_PAL_ARGS, int bpp, int swap) {
             else if (!swap)
                 okgf_store32(d + 4 * x, okgf_load32(p));
             else {
-                d[4 * x] = p[2];
-                d[4 * x + 1] = p[1];
-                d[4 * x + 2] = p[0];
-                d[4 * x + 3] = p[3];
+                /* 0x1005C34A reads the entire palette entry before the
+                 * byte stores; the destination may overlap that entry. */
+                uint32_t color = okgf_load32(p);
+                okgf_store32(d + 4 * x, (color & UINT32_C(0xFF00FF00)) | ((color & 255) << 16) |
+                                            ((color >> 16) & 255));
             }
         }
         s += source_pitch;

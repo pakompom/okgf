@@ -7,43 +7,49 @@ static const uint8_t cosine_light64[4096] = {
 #include "tables/planet_light_table.inc"
 };
 
-static void draw(OKGF_PLANET_ARGS, const OkgfRect *clip, int variant, int pixel_bytes, int is555) {
+static void draw(OKGF_PLANET_ARGS, const void *clip, int variant, int pixel_bytes, int is555) {
     OkgfRect bounds;
-    if (clip) {
+    if (clip)
         memcpy(&bounds, clip, sizeof(bounds));
-        clip = &bounds;
-    }
     int64_t top = (int64_t)dest_y + template_data->origin_y;
     if (clip) {
         int64_t left = (int64_t)dest_x + template_data->origin_x;
         int64_t right = left + template_data->width;
         int64_t bottom = top + template_data->height;
-        if (left >= clip->left && right <= clip->right && top >= clip->top &&
-            bottom <= clip->bottom)
+        if (left >= bounds.left && right <= bounds.right && top >= bounds.top &&
+            bottom <= bounds.bottom)
             clip = NULL;
-        else if (left >= clip->right || right <= clip->left || top >= clip->bottom ||
-                 bottom <= clip->top)
+        else if (left >= bounds.right || right <= bounds.left || top >= bounds.bottom ||
+                 bottom <= bounds.top)
             return;
     }
     for (int32_t row = 0; row < template_data->height; ++row) {
         int64_t y = top + row;
-        if (clip && (y < clip->top || y >= clip->bottom))
+        /* Original 0x100351B0 caches vertical trimming before drawing, but
+         * reloads horizontal bounds for each row. The clip may alias output. */
+        if (clip && (y < bounds.top || y >= bounds.bottom))
             continue;
         const OkgfPlanetScanline *line = &template_data->scanlines[row];
         int64_t x = (int64_t)dest_x + line->dest_x;
-        int32_t first = 0, end = line->pixel_count;
+        int64_t first = 0, end = line->pixel_count;
         if (clip) {
-            if (x < clip->left)
-                first = (int32_t)((int64_t)clip->left - x);
-            if (x + end > clip->right)
-                end = (int32_t)((int64_t)clip->right - x);
+            OkgfRect row_bounds;
+            memcpy(&row_bounds, clip, sizeof(row_bounds));
+            if (x < row_bounds.left)
+                first = (int64_t)row_bounds.left - x;
+            if (x + end > row_bounds.right)
+                end = (int64_t)row_bounds.right - x;
         }
+        /* Aliased bounds can move completely past the row. Reject before
+         * narrowing so a large distance cannot wrap into a negative sample. */
+        if (end <= 0 || first >= end)
+            continue;
         const uint8_t *texture_row = texture + (ptrdiff_t)line->source_y * texture_pitch;
         const uint8_t *light_row =
             light->pixels +
             ((ptrdiff_t)light->origin_y + template_data->origin_y + row) * light->pitch_bytes +
             light->origin_x + line->dest_x;
-        for (int32_t i = first; i < end; ++i) {
+        for (int32_t i = (int32_t)first; i < end; ++i) {
             const OkgfPlanetSample *sample = &line->samples[i];
             uint32_t sx = ((uint32_t)texture_x_offset + sample->source_x) & texture_x_mask;
             const uint8_t *texel = texture_row + (ptrdiff_t)sx * (variant == 2 ? 1 : 2);

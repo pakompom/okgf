@@ -33,34 +33,44 @@ void OKGF_CALL OKGR_RotateBuf_Size(int32_t dest_x, int32_t dest_y, uint8_t angle
     memcpy(bounds, &result, sizeof(result));
 }
 
-static void draw(OKGF_ROTATE_ARGS, const OkgfRect *clip, int pixel_step, int sample_bytes,
+static void draw(OKGF_ROTATE_ARGS, const void *clip, int pixel_step, int sample_bytes,
                  int transparent) {
     const OkgfRotationFrame *frame = &rotation->frames[angle];
     int64_t first_y = (int64_t)dest_y + frame->dest_y;
+    OkgfRect bounds;
     if (clip) {
-        if ((int64_t)dest_x + frame->min_x > clip->right ||
-            (int64_t)dest_x + frame->max_x < clip->left || first_y > clip->bottom ||
-            first_y + frame->scanline_count - 1 < clip->top)
+        memcpy(&bounds, clip, sizeof(bounds));
+        if ((int64_t)dest_x + frame->min_x > bounds.right ||
+            (int64_t)dest_x + frame->max_x < bounds.left || first_y > bounds.bottom ||
+            first_y + frame->scanline_count - 1 < bounds.top)
             return;
-        if ((int64_t)dest_x + frame->min_x >= clip->left &&
-            (int64_t)dest_x + frame->max_x <= clip->right && first_y >= clip->top &&
-            first_y + frame->scanline_count - 1 <= clip->bottom)
+        if ((int64_t)dest_x + frame->min_x >= bounds.left &&
+            (int64_t)dest_x + frame->max_x <= bounds.right && first_y >= bounds.top &&
+            first_y + frame->scanline_count - 1 <= bounds.bottom)
             clip = NULL;
     }
     for (int32_t row = 0; row < frame->scanline_count; ++row) {
         int64_t y = first_y + row;
-        if (clip && (y < clip->top || y > clip->bottom))
+        /* Original 0x10062C20 caches vertical trimming before drawing, but
+         * reloads horizontal bounds for each row. The clip may alias output. */
+        if (clip && (y < bounds.top || y > bounds.bottom))
             continue;
         const OkgfRotationScanline *line = &frame->scanlines[row];
         int64_t x = (int64_t)dest_x + line->dest_x;
-        int32_t first = 0, end = line->pixel_count;
+        int64_t first = 0, end = line->pixel_count;
         if (clip) {
-            if (x < clip->left)
-                first = (int32_t)((int64_t)clip->left - x);
-            if (x + end - 1 > clip->right)
-                end = (int32_t)((int64_t)clip->right - x + 1);
+            OkgfRect row_bounds;
+            memcpy(&row_bounds, clip, sizeof(row_bounds));
+            if (x < row_bounds.left)
+                first = (int64_t)row_bounds.left - x;
+            if (x + end - 1 > row_bounds.right)
+                end = (int64_t)row_bounds.right - x + 1;
         }
-        for (int32_t sample = first; sample < end; ++sample) {
+        /* Aliased bounds can move completely past the row. Reject before
+         * narrowing so a large distance cannot wrap into a negative sample. */
+        if (end <= 0 || first >= end)
+            continue;
+        for (int32_t sample = (int32_t)first; sample < end; ++sample) {
             int32_t sx =
                 okgf_add32(line->source_x_start, sample_step(line->source_dx_16_16, sample));
             int32_t sy =

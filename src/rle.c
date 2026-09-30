@@ -25,14 +25,30 @@ static int32_t build(const void *source, int32_t pitch, int32_t width, int32_t h
     if (d) {
         okgf_store32(d + 4, (uint32_t)width);
         okgf_store32(d + 8, (uint32_t)height);
+        /* The DLL stores a temporary payload stride before reading pixels,
+         * then clears the full field at completion. Preserve the intermediate
+         * byte when input overlaps the output header. */
+        d[12] = mode == INVERSE_ALPHA ? 1 : 2;
     }
     for (int32_t y = 0; y < height; ++y, s += pitch) {
         int blank = 0;
+        int pending_literal = -1;
         for (int32_t x = 0; x < width;) {
-            int literal = is_literal(s + bpp * x, mode, key);
+            int literal =
+                pending_literal < 0 ? is_literal(s + bpp * x, mode, key) : pending_literal;
             int32_t n = 1;
-            while (n < 127 && x + n < width && is_literal(s + bpp * (x + n), mode, key) == literal)
+            pending_literal = -1;
+            while (n < 127 && x + n < width) {
+                int next_literal = is_literal(s + bpp * (x + n), mode, key);
+                if (next_literal != literal) {
+                    /* A transition sample is classified before the preceding
+                     * run is emitted. Emission may overwrite that sample when
+                     * source and destination overlap. */
+                    pending_literal = next_literal;
+                    break;
+                }
                 ++n;
+            }
             /* A full 127-sample run is flushed immediately in the DLL; only
              * a shorter entirely transparent row uses the 0x80 shortcut. */
             if (!literal && x == 0 && n == width && n < 127) {
@@ -130,7 +146,29 @@ static int input_size(enum DrawMode mode) {
         return 2;
     return mode >= SCALE_WORD ? 1 : 2;
 }
-static void literal_run(uint8_t *d, const uint8_t *s, int n, enum DrawMode mode, uint32_t color) {
+static void literal_run(uint8_t *d, const uint8_t *s, int n, enum DrawMode mode, uint32_t color,
+                        int clipped) {
+    if (mode == COPY_WORD) {
+        /* MOVSD reads a complete pair before writing it, which matters when
+         * literal data overlaps the destination. The clipped decoder copies
+         * a two-pixel fragment as one DWORD even at an unaligned address; the
+         * sequential decoder always performs its alignment WORD first. */
+        if (n && (!clipped || n > 2) && ((uintptr_t)d & 3)) {
+            okgf_store16(d, okgf_load16(s));
+            d += 2;
+            s += 2;
+            --n;
+        }
+        while (n >= 2) {
+            okgf_store32(d, okgf_load32(s));
+            d += 4;
+            s += 4;
+            n -= 2;
+        }
+        if (n)
+            okgf_store16(d, okgf_load16(s));
+        return;
+    }
     if (mode == ADD_WORD) {
         /* DWORD addition can carry from one RGB565 pixel into the next. Two-pixel runs always use a
          * DWORD; longer runs align the destination first. */
@@ -266,7 +304,7 @@ static void draw(void *dest, int32_t pitch, const OkgfRleHeader *source, enum Dr
             offset += (ptrdiff_t)command * output_bpp;
         else {
             int n = command & 127;
-            literal_run((uint8_t *)dest + offset, s, n, mode, color);
+            literal_run((uint8_t *)dest + offset, s, n, mode, color, 0);
             s += n * input_bpp;
             remaining -= n * input_bpp;
             offset += (ptrdiff_t)n * output_bpp;
@@ -306,7 +344,7 @@ static void draw_clip(OKGF_RLE_CLIP_ARGS, enum DrawMode mode, uint32_t color) {
                     if (lo < hi)
                         literal_run((uint8_t *)dest + (ptrdiff_t)py * pitch +
                                         output_bpp * (ptrdiff_t)(px + lo),
-                                    s + input_bpp * lo, hi - lo, mode, color);
+                                    s + input_bpp * lo, hi - lo, mode, color, 1);
                 }
                 s += n * input_bpp;
             }

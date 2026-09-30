@@ -150,7 +150,7 @@ static int32_t walk_line(void *pixels, int32_t pitch, int32_t x, int32_t y, int3
                     OKGR_PixelAlpha_16(p, (uint16_t)color, phase_alpha[phase]);
                 if (mode == SHADOW) {
                     unsigned shift = shadow[(ptrdiff_t)y * shadow_pitch + x];
-                    okgf_store16(p, (uint16_t)((okgf_load16(p) >> shift) &
+                    okgf_store16(p, (uint16_t)((okgf_load16(p) >> (shift & 31)) &
                                                (is555 ? okgf_shift_mask555(shift)
                                                       : okgf_shift_mask565(shift))));
                 }

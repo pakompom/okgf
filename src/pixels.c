@@ -83,7 +83,18 @@ static void convert_rect(OKGF_RECT_ARGS, int source_bpp, int dest_bpp, int is555
         (const uint8_t *)source + (ptrdiff_t)source_pitch * source_y + source_bpp * source_x;
     uint8_t *d = (uint8_t *)dest + (ptrdiff_t)dest_pitch * dest_y + dest_bpp * dest_x;
     for (int32_t y = 0; y < height; ++y) {
-        for (int32_t x = 0; x < width; ++x) {
+        int32_t x = 0;
+        if (dest_bpp == 2 && source_bpp != 2) {
+            /* HD: 0x1005B930/0x1005BAA0; SR1 555: 0x1000CF10.
+             * Read both RGB pixels before storing their packed DWORD. */
+            for (; x <= width - 2; x += 2) {
+                const uint8_t *p = s + (ptrdiff_t)source_bpp * x;
+                uint32_t first = is555 ? rgb555(p) : rgb565(p);
+                uint32_t second = is555 ? rgb555(p + source_bpp) : rgb565(p + source_bpp);
+                okgf_store32(d + (ptrdiff_t)2 * x, first | (second << 16));
+            }
+        }
+        for (; x < width; ++x) {
             const uint8_t *p = s + source_bpp * x;
             if (dest_bpp == 2)
                 okgf_store16(d + 2 * x, source_bpp == 2 ? okgf_565_to555(okgf_load16(p))
@@ -91,9 +102,12 @@ static void convert_rect(OKGF_RECT_ARGS, int source_bpp, int dest_bpp, int is555
                                                                      (p[1] & 248u) << 2 | p[2] >> 3)
                                                         : rgb565(p));
             else {
-                d[3 * x] = p[0];
-                d[3 * x + 1] = p[1];
-                d[3 * x + 2] = p[2];
+                /* 0x1005BA10 loads the source before either output store.
+                 * Only its three RGB bytes affect the result. */
+                uint16_t first = okgf_load16(p);
+                uint8_t last = p[2];
+                okgf_store16(d + 3 * x, first);
+                d[3 * x + 2] = last;
             }
         }
         s += source_pitch;

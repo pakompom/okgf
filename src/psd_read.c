@@ -1,4 +1,5 @@
 #include "okgf.h"
+#include "okgf_internal.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -79,6 +80,14 @@ static int32_t decode(OkgfPsdReadContext *context, void *pixels, int32_t pitch, 
     size_t plane_size = (size_t)width * (size_t)height;
     if (plane_size / (size_t)height != (size_t)width || plane_size > SIZE_MAX / channels)
         return 0;
+    /* The bitmap loader reparses the borrowed source, but the exported reader
+     * copies the row size captured by begin. Preserve that distinction when a
+     * caller changes the source header between calls, without reading past the
+     * newly decoded row when the cached row is larger. The cached multiplication
+     * itself wraps at 32 bits, as in the original reader. */
+    uint32_t copy_bytes = okgf_load32(context->header + 18) * okgf_load16(context->header + 12);
+    if (copy_bytes > (uint64_t)(uint32_t)width * channels)
+        return 0;
     const uint8_t *cursor = source + 26, *end = source + context->source_size;
     const uint8_t *color_data = NULL;
     uint32_t color_size = 0;
@@ -149,7 +158,7 @@ static int32_t decode(OkgfPsdReadContext *context, void *pixels, int32_t pitch, 
     }
     for (int32_t y = 0; y < height; ++y)
         memcpy((uint8_t *)pixels + (ptrdiff_t)y * pitch, decoded + (size_t)y * width * channels,
-               (size_t)width * channels);
+               (size_t)copy_bytes);
     free(decoded);
     okgf_cancel_read_psd(context);
     return 1;

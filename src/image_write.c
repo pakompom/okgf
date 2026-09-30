@@ -13,8 +13,10 @@ int32_t OKGF_CALL OKGF_Write_BMP_File(const char *filename, const void *pixels, 
     (void)green_mask;
     (void)blue_mask;
     (void)alpha_mask;
-    if (width <= 0 || height <= 0 ||
-        (bits_per_pixel != 16 && bits_per_pixel != 24 && bits_per_pixel != 32))
+    /* The bitmap serializer writes raw rows for every unsigned depth above eight,
+     * even nonstandard depths and signed values that wrap to large unsigned ones.
+     * Indexed depths instead use uninitialized palettes in the DLL; reject those. */
+    if (width <= 0 || height <= 0 || (uint32_t)bits_per_pixel <= 8)
         return 1;
     if (!pitch_bytes) {
         uint32_t row_bytes = ((uint32_t)bits_per_pixel * (uint32_t)width) >> 3;
@@ -33,7 +35,7 @@ int32_t OKGF_CALL OKGF_Write_BMP_File(const char *filename, const void *pixels, 
     okgf_store32(header + 18, (uint32_t)width);
     okgf_store32(header + 22, (uint32_t)height);
     header[26] = 1;
-    header[28] = (uint8_t)bits_per_pixel;
+    okgf_store16(header + 28, (uint16_t)bits_per_pixel);
     okgf_store32(header + 34, data_size);
     (void)fwrite(header, 1, sizeof(header), file);
     for (int32_t y = height; y > 0; --y)

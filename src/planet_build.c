@@ -2,6 +2,11 @@
 #include "math/backend.h"
 #include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
+
+static void store_byte_count(void *byte_count, int32_t value) {
+    memcpy(byte_count, &value, sizeof(value));
+}
 
 static int32_t round_coordinate(double value) {
     OkgfFloat v;
@@ -59,13 +64,14 @@ static int project_span(OkgfPlanetSample *samples, int32_t count, int32_t textur
 OkgfPlanetTemplate *OKGF_CALL OKGR_Planet2_TemplBuild(const void *source, int32_t source_pitch,
                                                       int32_t diameter, int32_t texture_width,
                                                       int32_t texture_height, int32_t *byte_count) {
-    *byte_count = 0;
+    store_byte_count(byte_count, 0);
     if (diameter <= 0 || texture_width <= 0 || texture_height <= 0 ||
         diameter > (INT32_MAX - 20) / 28)
         return NULL;
     OkgfPlanetTemplate *result = calloc(1, sizeof(*result));
     if (!result)
         return NULL;
+    store_byte_count(byte_count, 20);
     OkgfMathState saved = fp_enter();
     result->width = result->height = diameter;
     result->origin_x = result->origin_y = 1 - diameter / 2;
@@ -74,6 +80,7 @@ OkgfPlanetTemplate *OKGF_CALL OKGR_Planet2_TemplBuild(const void *source, int32_
     if (!result->scanlines || !projected)
         goto failure;
     int64_t bytes = 20 + (int64_t)28 * diameter;
+    store_byte_count(byte_count, (int32_t)bytes);
     double source_y = 0.0;
     OkgfFloat a;
     fp_set(a, texture_height);
@@ -137,6 +144,9 @@ OkgfPlanetTemplate *OKGF_CALL OKGR_Planet2_TemplBuild(const void *source, int32_
         line->samples = calloc((size_t)line->pixel_count, sizeof(*line->samples));
         if (!line->samples)
             goto failure;
+        /* Original 0x10034310 updates this output before sampling each row.
+         * It may alias source alpha bytes, including those read below. */
+        store_byte_count(byte_count, (int32_t)bytes);
         if (projected[line->pixel_count]) {
             for (int32_t i = 0; i < line->pixel_count; ++i)
                 line->samples[i].source_x = projected[line->pixel_count][i].source_x;
@@ -157,12 +167,12 @@ OkgfPlanetTemplate *OKGF_CALL OKGR_Planet2_TemplBuild(const void *source, int32_
         source_y = fp_double(a);
     }
     free(projected);
-    *byte_count = (int32_t)bytes;
     fp_leave(saved);
     return result;
 failure:
     free(projected);
     OKGR_Planet2_TemplDel(result);
+    store_byte_count(byte_count, 0);
     fp_leave(saved);
     return NULL;
 }
