@@ -79,6 +79,8 @@ EXPAND(OKGF_Convert5558toBGRA, 1, 1, 1, 1)
 #define RECT_FORWARD                                                                               \
     dest, dest_pitch, dest_x, dest_y, source, source_pitch, source_x, source_y, width, height
 static void convert_rect(OKGF_RECT_ARGS, int source_bpp, int dest_bpp, int is555) {
+    if (width <= 0 || height <= 0)
+        return;
     const uint8_t *s =
         (const uint8_t *)source + (ptrdiff_t)source_pitch * source_y + source_bpp * source_x;
     uint8_t *d = (uint8_t *)dest + (ptrdiff_t)dest_pitch * dest_y + dest_bpp * dest_x;
