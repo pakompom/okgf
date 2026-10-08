@@ -28,7 +28,12 @@ if(OKGF_MATH_BACKEND STREQUAL "NATIVE" AND OKGF_PORTABLE_MATH)
   message(FATAL_ERROR "OKGF_PORTABLE_MATH applies to COMPATIBLE, not NATIVE")
 endif()
 message(STATUS "OKGF math backend: ${OKGF_MATH_BACKEND}")
-add_library(okgf SHARED
+if(EMSCRIPTEN)
+  set(OKGF_LIBRARY_TYPE STATIC)
+else()
+  set(OKGF_LIBRARY_TYPE SHARED)
+endif()
+add_library(okgf ${OKGF_LIBRARY_TYPE}
   src/math/precision.c
   src/cpu.c
   src/pixels.c
@@ -61,10 +66,15 @@ if(WIN32)
   target_link_libraries(okgf PRIVATE gdi32 user32 ole32 oleaut32 version)
 endif()
 
-find_package(JPEG REQUIRED)
-target_link_libraries(okgf PRIVATE JPEG::JPEG)
-find_package(PNG REQUIRED)
-target_link_libraries(okgf PRIVATE PNG::PNG)
+if(EMSCRIPTEN)
+  target_compile_options(okgf PRIVATE -sUSE_LIBJPEG=1 -sUSE_LIBPNG=1 -sUSE_ZLIB=1)
+  target_link_options(okgf INTERFACE -sUSE_LIBJPEG=1 -sUSE_LIBPNG=1 -sUSE_ZLIB=1)
+else()
+  find_package(JPEG REQUIRED)
+  target_link_libraries(okgf PRIVATE JPEG::JPEG)
+  find_package(PNG REQUIRED)
+  target_link_libraries(okgf PRIVATE PNG::PNG)
+endif()
 if(OKGF_MATH_BACKEND STREQUAL "NATIVE")
   target_compile_definitions(okgf PRIVATE OKGF_NATIVE_MATH=1)
 else()
